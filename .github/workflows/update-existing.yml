@@ -29,7 +29,7 @@ jobs:
             headers: {Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`}
           });
           const d = await r.json();
-          if (!r.ok() || !d.success) throw new Error('Cannot access existing cfmgr project');
+          if (!r.ok || !d.success) throw new Error('Cannot access existing cfmgr project');
           const env = d.result.deployment_configs.production;
           if (env.env_vars?.ENCRYPTION_KEY?.type !== 'secret_text') throw new Error('Existing encryption secret missing');
           if (env.d1_databases?.DB?.id !== 'ea49bc67-a724-4322-b0b5-cd83ddf9f9a5') throw new Error('Unexpected database binding');
@@ -52,3 +52,4 @@ jobs:
           kv_namespace_name: cfmgr
           full_wipe: 'false'
           demo_mode: 'false'
+
