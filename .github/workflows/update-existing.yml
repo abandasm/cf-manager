@@ -1,0 +1,54 @@
+name: Update cfmgr (preserve existing secrets)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cfmgr-production-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 21d5584045b4fe2b706124015c708867
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify existing project and preserve secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/pages/projects/cfmgr`, {
+            headers: {Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`}
+          });
+          const d = await r.json();
+          if (!r.ok() || !d.success) throw new Error('Cannot access existing cfmgr project');
+          const env = d.result.deployment_configs.production;
+          if (env.env_vars?.ENCRYPTION_KEY?.type !== 'secret_text') throw new Error('Existing encryption secret missing');
+          if (env.d1_databases?.DB?.id !== 'ea49bc67-a724-4322-b0b5-cd83ddf9f9a5') throw new Error('Unexpected database binding');
+          if (env.kv_namespaces?.KV?.namespace_id !== '087e72718f5d433394dd9e382763fb02') throw new Error('Unexpected KV binding');
+          const path = '.github/actions/deploy-cf/action.yml';
+          let action = fs.readFileSync(path, 'utf8');
+          const start = action.indexOf('    - name: Configure secrets\n');
+          const end = action.indexOf('    - name: Deploy to Cloudflare Pages\n', start);
+          if (start < 0 || end <= start) throw new Error('Upstream deployment structure changed; review before deploying');
+          action = action.slice(0, start) + action.slice(end);
+          if (action.includes('wrangler pages secret put ENCRYPTION_KEY')) throw new Error('Secret update still present');
+          fs.writeFileSync(path, action);
+          console.log('Verified existing bindings. All existing Pages secrets will be preserved.');
+          JS
+      - name: Update existing deployment and apply migrations
+        uses: ./.github/actions/deploy-cf
+        with:
+          project_name: cfmgr
+          d1_database_name: cfmgr
+          kv_namespace_name: cfmgr
+          full_wipe: 'false'
+          demo_mode: 'false'
